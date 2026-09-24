@@ -61,11 +61,16 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(len(result.attempts), 2)
         self.assertIn("requires exactly two steps", generator.prompts[1])
 
-    def test_fallback_report_is_not_counted_as_faithful(self):
-        generator = ScriptedGenerator(plan("SELECT COUNT(*) FROM products WHERE category = 'Ropa'"), "not json")
-        result = BusinessAssistant(DB, generator).answer("¿Cuántos productos tiene Ropa?")
-        self.assertEqual(result.report_source, "fallback")
-        self.assertFalse(result.fidelity.faithful)
+    def test_plain_text_reports_are_checked_and_empty_ones_fall_back(self):
+        ropa = plan("SELECT COUNT(*) FROM products WHERE category = 'Ropa'")
+        for raw, source, faithful in (
+            ("La categoría Ropa tiene 2 productos.", "model", True),
+            ('```\n"Ropa tiene 3 productos."\n```', "model", False),
+            (report("Ropa tiene 2 productos."), "model", True),
+            ("   ", "fallback", False),
+        ):
+            result = BusinessAssistant(DB, ScriptedGenerator(ropa, raw)).answer("¿Cuántos productos tiene Ropa?")
+            self.assertEqual((result.report_source, result.fidelity.faithful), (source, faithful), raw)
 
     def test_failure_keeps_every_attempt(self):
         bad = plan("SELECT SUM(quantity) FROM sales WHERE products.category = 'Alimentos'")

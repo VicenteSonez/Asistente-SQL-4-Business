@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument("--heldout", default=ROOT / "data" / "paraphrases.json", type=Path)
     parser.add_argument("--systems", default=",".join(SYSTEMS), help="comma-separated subset of " + ",".join(SYSTEMS))
     parser.add_argument("--limit", type=int, default=0, help="questions per set, for a smoke test")
-    parser.add_argument("--output", default=ROOT / "results" / "deliverable2_v2.json", type=Path)
+    parser.add_argument("--output", default=ROOT / "results" / "deliverable2_v3.json", type=Path)
     parser.add_argument("--tex", type=Path, help="also write the LaTeX results table here")
     args = parser.parse_args()
 

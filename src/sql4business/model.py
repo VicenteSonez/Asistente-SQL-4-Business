@@ -133,10 +133,11 @@ SQL steps that produced it:
 {evidence}
 
 Write one or two sentences for a non-technical manager, in the same language as the question.
-Use only the numbers and names of the verified answer and the steps, written with digits.
-Do not add other figures. For a percentage change, state whether it is an increase or a decrease.
+Use only the numbers and names of the verified answer and the steps. Copy each number exactly
+as it appears above (for example 97658120 or 59.08), without adding separators, and do not add
+other figures. For a percentage change, state whether it is an increase or a decrease.
 Describe periods and groups as the steps define them.
-Return exactly one JSON object and nothing else: {{"answer": "..."}}
+Return only the sentences, without JSON, markdown or quotes.
 """
 
 

@@ -47,7 +47,7 @@ class AssistantResult:
             "plan": self.plan,
             "executions": [{"sql": e.sql, "rows": rows_to_json(e.rows)} for e in self.executions],
             "composed": {"operation": self.composed.operation, "value": self.composed.value, "details": self.composed.details},
-            "report": self.report,
+            "report_text": self.report,
             "report_source": self.report_source,
             "raw_report": self.raw_report,
             "report_faithful": self.fidelity.faithful,
@@ -153,7 +153,7 @@ class BusinessAssistant:
                 evidence = question + "\n" + json.dumps(steps, ensure_ascii=False)
                 fidelity = check_report(report, composed.value, evidence)
             else:
-                fidelity = FidelityCheck(False, ["The reporter did not return valid JSON; the deterministic summary is shown."])
+                fidelity = FidelityCheck(False, ["The reporter returned no text; the deterministic summary is shown."])
             return AssistantResult(question, plan, executions, composed, report, source, raw_report, fidelity, attempts)
         raise AssistantFailure(question, attempts)
 
@@ -179,12 +179,14 @@ class BusinessAssistant:
             for step, execution in zip(plan["steps"], executions)
         ]
         raw = self.generator.generate(report_prompt(question, composed.value, steps))
-        try:
-            text = parse_json_object(raw)["answer"]
-            if isinstance(text, str) and text.strip():
-                return text.strip(), "model", raw
-        except (ValueError, KeyError):
-            pass
+        text = strip_fences(raw).strip().strip('"').strip()
+        if text.startswith("{"):  # Tolerate the JSON shape used by earlier prompts.
+            try:
+                text = str(parse_json_object(text).get("answer", "")).strip()
+            except ValueError:
+                pass
+        if text:
+            return text, "model", raw
         return summarize(composed), "fallback", raw
 
 
