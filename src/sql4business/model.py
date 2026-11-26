@@ -9,6 +9,9 @@ from typing import Any, Protocol
 
 
 MODEL_ID = "Qwen/Qwen2.5-Coder-3B-Instruct"
+# Revision evaluated in Deliverables 2-4 (the D4 adapter is trained on it); pinned so a new upload
+# of the base model cannot change the results.
+MODEL_REVISION = "488639f1ff808d1d3d0ba301aef8c11461451ec5"
 
 # Direct-prompting baseline, verbatim from notebooks/baseline_eval.ipynb (Deliverable 1).
 BASELINE_TEMPLATE = """Eres un asistente que traduce preguntas de negocio a SQL.
@@ -37,14 +40,21 @@ class GenerationSettings:
 class HuggingFaceGenerator:
     """Greedy generation with 4-bit NF4 quantization, as declared in Deliverable 1."""
 
-    def __init__(self, model_id: str = MODEL_ID, settings: GenerationSettings | None = None):
+    def __init__(
+        self,
+        model_id: str = MODEL_ID,
+        settings: GenerationSettings | None = None,
+        adapter: str | None = None,
+        adapter_revision: str | None = None,
+    ):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.model_id = model_id
         self.settings = settings or GenerationSettings()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        kwargs: dict[str, Any] = {"device_map": "auto"}
+        revision = MODEL_REVISION if model_id == MODEL_ID else None
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
+        kwargs: dict[str, Any] = {"device_map": "auto", "revision": revision}
         if self.settings.load_in_4bit and torch.cuda.is_available():
             from transformers import BitsAndBytesConfig
 
@@ -54,8 +64,32 @@ class HuggingFaceGenerator:
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
         self.model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        # Deliverable 4: one copy of the base weights in memory; the LoRA adapter of the fine-tuned
+        # Planner is attached on top and switched off for every other agent.
+        self.adapter = adapter
+        self.adapter_revision = adapter_revision
+        if adapter:
+            from peft import PeftModel
+
+            self.model = PeftModel.from_pretrained(self.model, adapter, revision=adapter_revision)
+        self.model.eval()
 
     def generate(self, prompt: str, max_new_tokens: int | None = None) -> str:
+        """The base model (adapter off, if one is loaded)."""
+
+        if self.adapter:
+            with self.model.disable_adapter():
+                return self._generate(prompt, max_new_tokens)
+        return self._generate(prompt, max_new_tokens)
+
+    def adapted(self) -> "AdapterView":
+        """A generator that answers with the fine-tuned adapter on."""
+
+        if not self.adapter:
+            raise ValueError("No adapter was loaded.")
+        return AdapterView(self)
+
+    def _generate(self, prompt: str, max_new_tokens: int | None = None) -> str:
         messages = [{"role": "user", "content": prompt}]
         inputs = self.tokenizer.apply_chat_template(
             messages,
@@ -70,6 +104,16 @@ class HuggingFaceGenerator:
         )
         generated = output[0][inputs["input_ids"].shape[1] :]
         return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+
+class AdapterView:
+    """The same loaded model, generating with the LoRA adapter on (the fine-tuned Planner)."""
+
+    def __init__(self, owner: HuggingFaceGenerator):
+        self.owner = owner
+
+    def generate(self, prompt: str, max_new_tokens: int | None = None) -> str:
+        return self.owner._generate(prompt, max_new_tokens)
 
 
 def baseline_prompt(schema: str, question: str) -> str:

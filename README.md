@@ -11,6 +11,7 @@ Generative Artificial Intelligence (580694), Universidad de Concepción.
 | Deliverable 1 | [`docs/deliverable1.pdf`](docs/deliverable1.pdf) | [`notebooks/baseline_eval.ipynb`](notebooks/baseline_eval.ipynb) |
 | Deliverable 2 | [`docs/deliverable2.pdf`](docs/deliverable2.pdf) · [video](https://drive.google.com/file/d/1ovemshyIkbVYasXr7zaFDXIrdrHN7OH5/view) | [`notebooks/deliverable2_demo.ipynb`](notebooks/deliverable2_demo.ipynb) |
 | Deliverable 3 | [`docs/deliverable3.pdf`](docs/deliverable3.pdf) · [video](https://drive.google.com/file/d/1I9KuGPZe99HninfvLdC2E1XQjTf00EQZ/view?usp=sharing) | [`notebooks/deliverable3_demo.ipynb`](notebooks/deliverable3_demo.ipynb) |
+| Deliverable 4 | [`docs/deliverable4.pdf`](docs/deliverable4.pdf) · video: **PENDIENTE** · adaptador: **PENDIENTE (Hugging Face)** | [`notebooks/deliverable4_finetune.ipynb`](notebooks/deliverable4_finetune.ipynb) |
 
 ## Definición de la tarea
 
@@ -41,6 +42,100 @@ preguntas que combinan varios datos, y la fidelidad numérica del reporte.
 
 Ambos JSON los genera `data/build_questions.py`, que ejecuta el SQL de referencia sobre
 `business.db`.
+
+## Deliverable 4: fine-tuning del Planificador
+
+El Deliverable 4 ajusta (QLoRA) el modelo del **Planificador** del sistema de agentes del D3. Los otros
+tres agentes siguen con el modelo base; el adaptador se carga una sola vez sobre el mismo modelo
+(`Qwen/Qwen2.5-Coder-3B-Instruct`, revisión `488639f`, NF4) y se apaga para ellos.
+
+- **Adaptador publicado:** **PENDIENTE** (`results/deliverable4/adapter_hf.json` guarda el repo y la revisión exacta).
+- **Video:** **PENDIENTE**.
+
+### Por qué el Planificador (evidencia del D3)
+
+Del análisis de las 27 trazas de la corrida v2 (`results/deliverable3/trazas/`):
+
+| Evidencia | Valor |
+|---|---|
+| Preguntas que el sistema falla (`e2e`) | 4: q04, q10, q12, q11-p |
+| …cuyo error nace en un plan del Planificador | **4 de 4** (Analista, Reportero y Verificador no originan errores) |
+| Veces que el Analista o el Verificador devolvieron el plan con un motivo | 6 |
+| …en que el Planificador devolvió **el mismo SQL** | **4 de 6** (q04, q10, q12, q11-p) |
+
+El prompting ya se agotó en el D3 (few-shot, descomposición, controles nuevos del Verificador y un
+ejemplo más en v2): detectar funciona, corregir no. Con decodificación greedy, el sesgo por el orden en
+que la pregunta nombra los períodos domina la retroalimentación. Por eso se cambia el comportamiento con
+pesos, y un **control** mide si los mismos datos dados como prompt (ejemplos recuperados) bastan.
+
+### Datos de entrenamiento (`data/finetune/`)
+
+`python scripts/build_planner_data.py` los regenera de forma determinista (semilla 4); un test comprueba
+que la salida es idéntica a la versionada. Código: [`src/sql4business/finetune_data.py`](src/sql4business/finetune_data.py).
+
+| | |
+|---|---|
+| Entrada | el prompt exacto del Planificador en ejecución (`prompts/planificador.md` con todas las técnicas del D3, esquema enriquecido, pregunta; en reparaciones, también el plan anterior y la retroalimentación) |
+| Salida | el plan JSON correcto (`answer_needs`, `periods`, `steps`, `composition`) |
+| Fuente | plantillas de preguntas sobre `data/business.db`, 8 familias, 86 % español y 14 % inglés, con y sin tildes |
+| Cómo se produce cada salida | **por código, sin ningún modelo generador**: el plan se construye a partir de los parámetros de la tarea, se ejecuta con las herramientas del Analista (validación, SQLite de solo lectura, composición) y se compara con un valor de referencia calculado en Python sobre las tablas; 0 discrepancias; se descartan empates |
+| Tamaño | 1.282 ejemplos: 883 de plan y 399 de reparación; train 1.155 / dev 127, separados por cálculo |
+| Reparación | 7 tipos de plan equivocado (×57): orden invertido (q12), filtro omitido (q04), participación como crecimiento (q11-p), dos valores con `direct` (q11), crecimiento en vez de comparar líderes (q10), listado en vez del primero (q03), mes corrido. La retroalimentación es la que produce `critic_problems`, la misma función del Verificador |
+| Revisión manual | muestra de 60 ejemplos en `data/finetune/revision_manual.csv`: **PENDIENTE** (revisores, N/60 correctos) |
+| Separación de la evaluación | de 4.737 tareas candidatas se eliminan 216 con la misma operación y resultados que una pregunta evaluada, 182 con algún paso numérico igual a un paso evaluado y 52 con similitud de 5-gramas ≥ 0,5. Máxima similitud restante: 0,19 (q15-p). `tests/test_finetune_data.py` lo comprueba |
+
+Resumen completo en [`data/finetune/reporte.json`](data/finetune/reporte.json).
+
+### Entrenamiento ([`scripts/train_planner.py`](scripts/train_planner.py))
+
+QLoRA con un bucle propio en PyTorch + PEFT 0.22: base NF4 de 4 bits; LoRA r=16, α=32, dropout 0,05 en
+`q,k,v,o,gate,up,down_proj`; AdamW, lr 2e-4, 5 % de calentamiento y coseno; 2 épocas; lote efectivo 8;
+fp16 (el T4 no tiene bf16); gradient checkpointing; largo máximo 2.560 tokens (el mayor ejemplo tiene
+2.243). La pérdida se calcula solo sobre los tokens del plan. Salidas en `results/deliverable4/adapter/`:
+`loss.csv`, `training_log.json` (configuración, hardware, versiones, tiempo) y la tarjeta del modelo.
+Los pesos (`*.safetensors`) no se versionan en git: están en Hugging Face.
+
+### Evaluación ([`scripts/evaluate_d4.py`](scripts/evaluate_d4.py))
+
+Las mismas 27 preguntas y criterios, los cinco en la misma sesión:
+
+| Configuración | Qué es |
+|---|---|
+| `baseline` | (1) prompt directo del D1 |
+| `d2` | (2) pipeline del D2 |
+| `agentes` | (3) sistema de agentes del D3, todos con el modelo base |
+| `agentes_ft` | (4) el mismo sistema con el Planificador ajustado |
+| `control_icl` | control: pesos base; el Planificador recibe en su prompt los 4 ejemplos de entrenamiento más parecidos ([`icl_control.py`](src/sql4business/icl_control.py)) |
+
+Además se cuenta cuántas veces el Planificador repite un plan devuelto. Resultados: **PENDIENTE**
+(`results/deliverable4/<config>.json`, trazas en `results/deliverable4/trazas_<config>/`, detalle por
+pregunta en `results/deliverable4/por_pregunta.md`, tabla del PDF en `docs/deliverable4_results.tex`).
+
+### Caso de falla
+
+**PENDIENTE**: una entrada donde el sistema con el Planificador ajustado aún falla o empeora, por qué, y
+su traza en `results/deliverable4/trazas_agentes_ft/`.
+
+### Cómo reproducir el Deliverable 4
+
+1. Abrir [`notebooks/deliverable4_finetune.ipynb`](https://colab.research.google.com/github/aredhel-jmze/Asistente-SQL-4-Business/blob/deliverable4/notebooks/deliverable4_finetune.ipynb) en Colab con GPU T4
+   (mientras el D4 esté en la rama `deliverable4`; el notebook usa `REF = "deliverable4"`, cambiarlo a `main` tras el merge).
+2. **Datos** (sin GPU): `python scripts/build_planner_data.py`.
+3. **Entrenamiento** (unos 60–80 min): `python scripts/train_planner.py --push-to-hub <usuario>/sql4business-planificador-qlora`.
+   Para solo reproducir resultados, saltar este paso: la evaluación descarga el adaptador publicado.
+4. **Evaluación** (unos 60 min): `python scripts/evaluate_d4.py --resume`.
+5. **Demo del video**: `python scripts/run_agents.py --id q12 --compare --no-baseline` muestra los mensajes
+   entre agentes con el Planificador base y luego con el ajustado, sobre la misma entrada (trazas en
+   `results/deliverable4/demo/q12_base.json` y `q12_ajustado.json`).
+6. **PDF**: `cd docs && pdflatex deliverable4.tex` (incluye la curva de pérdida y la tabla generada).
+7. **Tests sin GPU**: `python -m unittest discover -s tests`.
+
+### Cambios en el código del D3
+
+Solo dos, sin cambiar ninguna decisión (los tests que reproducen las 27 trazas de v2 siguen pasando):
+los controles del Verificador se extrajeron a `critic_problems` (para que los datos usen su mismo texto),
+y `AgentSystem` acepta un generador propio por agente (`agent_generators`). Además, el modelo base queda
+fijado en la revisión `488639f`, la evaluada desde el D2.
 
 ## Deliverable 3: sistema de agentes
 
@@ -428,12 +523,12 @@ resultado), y el resumen de la evaluación.
 
 ```
 .
-├── data/                 Base sintética, generadores y los dos conjuntos de preguntas
+├── data/                 Base sintética, generadores, los dos conjuntos de preguntas y finetune/ (D4)
 ├── docs/                 PDF y fuentes LaTeX de D1, D2 y D3, tablas generadas, enunciado de D2
 ├── notebooks/            baseline_eval.ipynb (D1), deliverable2_demo.ipynb y deliverable3_demo.ipynb (Colab)
 ├── prompts/              Prompt de cada agente del D3, un archivo versionado por agente
-├── results/              Resultados de D1, de D2 (v1, v2, v3) y de D3 (deliverable3/, con trazas)
-├── scripts/              D2: evaluate.py, run_question.py · D3: evaluate_d3.py, run_agents.py
+├── results/              Resultados de D1, D2 (v1, v2, v3), D3 (deliverable3/) y D4 (deliverable4/), con trazas
+├── scripts/              D2: evaluate.py, run_question.py · D3: evaluate_d3.py, run_agents.py · D4: build_planner_data.py, train_planner.py, evaluate_d4.py
 ├── src/sql4business/     Código del asistente (D2: pipeline.py; D3: agents.py) y de la evaluación
 ├── tests/                Tests por módulo, sin GPU (modelo simulado)
 └── artifacts/            Contexto de trabajo con IA y auditoría de D2

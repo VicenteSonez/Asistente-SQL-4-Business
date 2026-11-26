@@ -6,6 +6,10 @@ first, and the full trace is saved as JSON. Needs a GPU for the model.
 
     python scripts/run_agents.py --id q10-p
     python scripts/run_agents.py "¿Cuál fue el ingreso total de julio de 2026?"
+
+Deliverable 4 (video): the base Planner and the fine-tuned Planner on the same input, one after the other:
+
+    python scripts/run_agents.py --id q12 --compare --adapter usuario/sql4business-planificador-qlora
 """
 
 from __future__ import annotations
@@ -36,7 +40,18 @@ def main() -> None:
     parser.add_argument("--without", default="", help="comma-separated techniques to remove: " + ",".join(TECHNIQUES))
     parser.add_argument("--no-baseline", action="store_true")
     parser.add_argument("--trace", type=Path, help="trace file (default results/deliverable3/demo/<id>.json)")
+    parser.add_argument("--adapter", help="Deliverable 4: fine-tuned Planner adapter (Hugging Face repo id or folder)")
+    parser.add_argument("--adapter-revision")
+    parser.add_argument("--compare", action="store_true",
+                        help="with --adapter: run the base Planner and then the fine-tuned Planner on the same input")
     args = parser.parse_args()
+    if args.compare and not args.adapter:
+        published = ROOT / "results" / "deliverable4" / "adapter_hf.json"
+        if published.exists():
+            data = json.loads(published.read_text(encoding="utf-8"))
+            args.adapter, args.adapter_revision = data["repo_id"], args.adapter_revision or data.get("revision")
+        else:
+            args.adapter = str(ROOT / "results" / "deliverable4" / "adapter")
 
     official = load("questions.json")
     if args.id:
@@ -46,10 +61,11 @@ def main() -> None:
         question = args.question
     else:
         parser.error("give a question or --id")
-    trace_path = args.trace or ROOT / "results" / "deliverable3" / "demo" / f"{args.id or 'pregunta'}.json"
+    folder = "deliverable4" if args.adapter else "deliverable3"
+    trace_path = args.trace or ROOT / "results" / folder / "demo" / f"{args.id or 'pregunta'}.json"
     print("PREGUNTA:", question)
 
-    generator = HuggingFaceGenerator(args.model)
+    generator = HuggingFaceGenerator(args.model, adapter=args.adapter, adapter_revision=args.adapter_revision)
     if not args.no_baseline:
         print("\n=== Baseline (prompt directo del D1) ===")
         raw = generator.generate(baseline_prompt(official["schema"], question), BASELINE_MAX_NEW_TOKENS)
@@ -66,8 +82,18 @@ def main() -> None:
             print("filas:", execution.error or execution.rows[:10])
 
     disabled = [name.strip() for name in args.without.split(",") if name.strip()]
-    print("\n=== Sistema de agentes ===" + (f" (sin {', '.join(disabled)})" if disabled else ""))
-    system = AgentSystem(args.db, generator, disabled=disabled)
+    runs = [("base", {})]
+    if args.adapter:
+        runs = ([("base", {})] if args.compare else []) + [("ajustado", {"planner": generator.adapted()})]
+    for label, agent_generators in runs:
+        title = "Sistema de agentes" + (f" — Planificador {label}" if args.adapter else "")
+        print(f"\n=== {title} ===" + (f" (sin {', '.join(disabled)})" if disabled else ""))
+        system = AgentSystem(args.db, generator, disabled=disabled, agent_generators=agent_generators)
+        path = trace_path.with_name(f"{trace_path.stem}_{label}.json") if args.adapter else trace_path
+        run_system(system, question, path)
+
+
+def run_system(system: AgentSystem, question: str, trace_path: Path) -> None:
     try:
         result = system.answer(question, listener=lambda message: print(format_message(message, 400), flush=True))
     except AgentFailure as failure:

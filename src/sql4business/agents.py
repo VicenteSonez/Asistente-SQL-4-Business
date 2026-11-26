@@ -348,6 +348,66 @@ def missing_labels(question: str, sqls: list[str], labels: Iterable[str]) -> lis
     return missing
 
 
+def critic_problems(
+    question: str,
+    analysis: dict[str, Any],
+    composed: ComposedAnswer,
+    steps: list[dict[str, Any]],
+    sqls: list[str],
+    date_range: tuple[str, str] | None,
+    labels: Iterable[str],
+    trace: Trace | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """The Verificador's plan checks: problems sent back to the Planner, in the exact words it reads.
+
+    Shared by the Verificador (with a trace) and by the Deliverable 4 data builder (without one), so the
+    feedback in the fine-tuning data is the same text the Planner receives at run time.
+    """
+
+    def log(*args: Any) -> None:
+        if trace is not None:
+            trace.add(*args)
+
+    shapes = result_shapes(composed)
+    # Every check the Verifier relies on is logged as the output of its tool, so the trace shows
+    # where each problem comes from (forma_resultado: shapes and dropped steps; revisar_periodos:
+    # uncovered months and the order of the two periods of a percentage change).
+    dropped = unused_steps(steps, composed.operation)
+    log(VERIFIER, "herramienta:forma_resultado", "llamada", {"operation": composed.operation})
+    log("herramienta:forma_resultado", VERIFIER, "resultado", {"formas": sorted(shapes), "pasos_descartados": dropped})
+    missing = uncovered_periods(analysis["periods"], sqls, date_range)
+    reversed_order = False
+    if composed.operation == "growth_pct":
+        starts = first_dates(sqls)
+        reversed_order = None not in starts and starts[0] > starts[1]
+    log(VERIFIER, "herramienta:revisar_periodos", "llamada", {"periods": analysis["periods"]})
+    log("herramienta:revisar_periodos", VERIFIER, "resultado",
+        {"sin_cubrir": missing, "orden_invertido": reversed_order} if missing or reversed_order else "todos cubiertos, en orden")
+    problems = []
+    if analysis["asks_for"] and analysis["asks_for"] not in shapes:
+        problems.append(
+            f"The question asks for {DESCRIPTIONS[analysis['asks_for']]}, but the plan returns "
+            f"{describe_result(composed)}."
+        )
+    for period in missing:
+        problems.append(f"The question names the period {period['from']} to {period['to']}, but no step filters those dates.")
+    if dropped:
+        problems.append(
+            f"The direct operation only returns the last step, so the result of {', '.join(dropped)} is lost; "
+            "if the answer needs those values, use a two-step operation."
+        )
+    if reversed_order:
+        problems.append("growth_pct needs the earlier period in the first step and the later one in the second.")
+    found = missing_labels(question, sqls, labels)
+    log(VERIFIER, "herramienta:revisar_filtros", "llamada", {"question": question})
+    log("herramienta:revisar_filtros", VERIFIER, "resultado", found or "sin filtros faltantes")
+    for label in found:
+        problems.append(f"The question names '{label}', but no step filters by it.")
+    checks = {"asks_for": analysis["asks_for"], "result_shapes": sorted(shapes), "uncovered_periods": missing,
+              "unused_steps": dropped, "missing_labels": found}
+    return problems, checks
+
+
 # --------------------------------------------------------------------------- agents
 
 
@@ -364,23 +424,28 @@ class _Agent:
 
     def call_model(self, prompt: str, trace: Trace) -> str:
         trace.model_calls[self.name] += 1
-        return self.system.generator.generate(prompt, MAX_NEW_TOKENS[self.key])
+        return self.system.generator_for(self.key).generate(prompt, MAX_NEW_TOKENS[self.key])
 
 
 class PlannerAgent(_Agent):
     key, name = "planner", PLANNER
 
+    def build_prompt(self, question: str, feedback: str | None = None, previous_plan: Any = None) -> str:
+        """The exact prompt the Planner model reads (also the input of the Deliverable 4 training data)."""
+
+        flags = ("if_feedback",) if feedback else ()
+        return self.prompt(
+            *flags,
+            schema=self.system.schema,
+            question=question,
+            feedback=feedback or "",
+            previous_plan=_short(previous_plan, 1500) if previous_plan is not None else "",
+        )
+
     def run(self, question: str, trace: Trace, feedback: str | None = None, previous_plan: Any = None) -> dict[str, Any]:
         reason, previous = feedback, previous_plan
         for _ in range(self.system.max_format_revisions + 1):
-            flags = ("if_feedback",) if reason else ()
-            prompt = self.prompt(
-                *flags,
-                schema=self.system.schema,
-                question=question,
-                feedback=reason or "",
-                previous_plan=_short(previous, 1500) if previous is not None else "",
-            )
+            prompt = self.build_prompt(question, reason, previous)
             raw = self.call_model(prompt, trace)
             try:
                 parsed = parse_json_object(raw)
@@ -556,46 +621,11 @@ class VerifierAgent(_Agent):
         checks: dict[str, Any] = {}
         if "critic" in self.system.enabled and can_replan:
             analysis = self.analyse_question(question, trace)
-            shapes = result_shapes(outcome.composed)
-            # Every check the Verifier relies on is logged as the output of its tool, so the trace shows
-            # where each problem comes from (forma_resultado: shapes and dropped steps; revisar_periodos:
-            # uncovered months and the order of the two periods of a percentage change).
-            dropped = unused_steps(outcome.steps, outcome.composed.operation)
-            trace.add(VERIFIER, "herramienta:forma_resultado", "llamada", {"operation": outcome.composed.operation})
-            trace.add("herramienta:forma_resultado", VERIFIER, "resultado",
-                      {"formas": sorted(shapes), "pasos_descartados": dropped})
-            sqls = [execution.sql for execution in outcome.executions]
-            missing = uncovered_periods(analysis["periods"], sqls, self.system.date_range)
-            reversed_order = False
-            if outcome.composed.operation == "growth_pct":
-                starts = first_dates(sqls)
-                reversed_order = None not in starts and starts[0] > starts[1]
-            trace.add(VERIFIER, "herramienta:revisar_periodos", "llamada", {"periods": analysis["periods"]})
-            trace.add("herramienta:revisar_periodos", VERIFIER, "resultado",
-                      {"sin_cubrir": missing, "orden_invertido": reversed_order}
-                      if missing or reversed_order else "todos cubiertos, en orden")
-            problems = []
-            if analysis["asks_for"] and analysis["asks_for"] not in shapes:
-                problems.append(
-                    f"The question asks for {DESCRIPTIONS[analysis['asks_for']]}, but the plan returns "
-                    f"{describe_result(outcome.composed)}."
-                )
-            for period in missing:
-                problems.append(f"The question names the period {period['from']} to {period['to']}, but no step filters those dates.")
-            if dropped:
-                problems.append(
-                    f"The direct operation only returns the last step, so the result of {', '.join(dropped)} is lost; "
-                    "if the answer needs those values, use a two-step operation."
-                )
-            if reversed_order:
-                problems.append("growth_pct needs the earlier period in the first step and the later one in the second.")
-            labels = missing_labels(question, sqls, self.system.labels)
-            trace.add(VERIFIER, "herramienta:revisar_filtros", "llamada", {"question": question})
-            trace.add("herramienta:revisar_filtros", VERIFIER, "resultado", labels or "sin filtros faltantes")
-            for label in labels:
-                problems.append(f"The question names '{label}', but no step filters by it.")
-            checks = {"asks_for": analysis["asks_for"], "result_shapes": sorted(shapes), "uncovered_periods": missing,
-                      "unused_steps": dropped, "missing_labels": labels}
+            problems, checks = critic_problems(
+                question, analysis, outcome.composed, outcome.steps,
+                [execution.sql for execution in outcome.executions],
+                self.system.date_range, self.system.labels, trace,
+            )
             if problems:
                 feedback = " ".join(problems)
                 fidelity = FidelityCheck(False, ["Not checked: the plan was sent back to the Planner."])
@@ -652,6 +682,7 @@ class AgentSystem:
         max_sql_fixes: int = 2,
         max_report_revisions: int = 2,
         max_format_revisions: int = 2,
+        agent_generators: dict[str, TextGenerator] | None = None,
     ):
         disabled = set(disabled)
         unknown = disabled - set(TECHNIQUES)
@@ -659,6 +690,12 @@ class AgentSystem:
             raise ValueError(f"Unknown techniques: {sorted(unknown)}")
         self.db_path = Path(db_path)
         self.generator = generator
+        # Deliverable 4: an agent may run on its own weights (the fine-tuned Planner); the rest keep
+        # the base model. Keys are those of PROMPT_FILES.
+        self.agent_generators = dict(agent_generators or {})
+        unknown_agents = set(self.agent_generators) - set(PROMPT_FILES)
+        if unknown_agents:
+            raise ValueError(f"Unknown agents: {sorted(unknown_agents)}")
         self.enabled = set(TECHNIQUES) - disabled
         self.prompts_dir = Path(prompts_dir)
         self.max_replans = max_replans
@@ -677,6 +714,9 @@ class AgentSystem:
         self.analyst = AnalystAgent(self)
         self.reporter = ReporterAgent(self)
         self.verifier = VerifierAgent(self)
+
+    def generator_for(self, agent_key: str) -> TextGenerator:
+        return self.agent_generators.get(agent_key, self.generator)
 
     def answer(self, question: str, listener: Callable[[Message], None] | None = None) -> AgentResult:
         trace = Trace(listener)

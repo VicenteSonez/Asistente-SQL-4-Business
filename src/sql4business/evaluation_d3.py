@@ -29,7 +29,10 @@ from .pipeline import BusinessAssistant
 
 
 ABLATIONS = tuple(f"sin_{name}" for name in TECHNIQUES)
-CONFIGS = ("baseline", "d2", "agentes") + ABLATIONS
+# Deliverable 4: the agent system with the fine-tuned Planner, and the control that gives the base
+# Planner the same training data as retrieved examples in its prompt (see icl_control.py).
+D4_CONFIGS = ("agentes_ft", "control_icl")
+CONFIGS = ("baseline", "d2", "agentes") + ABLATIONS + D4_CONFIGS
 METRICS = {"baseline": ("sql", "answer")}
 DEFAULT_METRICS = ("sql", "answer", "report", "e2e")
 LABELS = {
@@ -42,6 +45,8 @@ LABELS = {
     "sin_self_correction": "\\quad sin autocorrección del Analista",
     "sin_critic": "\\quad sin verificación crítica",
     "sin_report_refine": "\\quad sin refinamiento del reporte",
+    "agentes_ft": "Agentes + Planificador ajustado (D4)",
+    "control_icl": "Control: mismos datos como ejemplos en el prompt",
 }
 
 
@@ -52,12 +57,16 @@ def metrics_for(config: str) -> tuple[str, ...]:
 class CountingGenerator:
     """Wraps the model to count calls per question (cost of each configuration)."""
 
-    def __init__(self, generator: TextGenerator):
+    def __init__(self, generator: TextGenerator, parent: "CountingGenerator | None" = None):
         self.generator = generator
+        self.parent = parent
         self.calls = 0
 
     def generate(self, prompt: str, max_new_tokens: int | None = None) -> str:
-        self.calls += 1
+        if self.parent is not None:
+            self.parent.calls += 1
+        else:
+            self.calls += 1
         return self.generator.generate(prompt, max_new_tokens)
 
 
@@ -94,6 +103,7 @@ def run_config(
     baseline_schema: str,
     trace_dir: str | Path | None = None,
     progress: Callable[[str], None] = print,
+    planner_generator: TextGenerator | None = None,
 ) -> dict[str, Any]:
     """Run one configuration on every question; optionally save one trace file per question."""
 
@@ -103,7 +113,13 @@ def run_config(
     counter = CountingGenerator(generator)
     assistant = BusinessAssistant(db_path, counter) if config == "d2" else None
     disabled = [config[4:]] if config.startswith("sin_") else []
-    system = AgentSystem(db_path, counter, disabled=disabled) if config == "agentes" or disabled else None
+    agent_generators = {}
+    if config in D4_CONFIGS:
+        if planner_generator is None:
+            raise ValueError(f"{config} needs the Planner's generator (fine-tuned adapter or retrieval control).")
+        agent_generators["planner"] = CountingGenerator(planner_generator, parent=counter)
+    uses_agents = config == "agentes" or bool(disabled) or config in D4_CONFIGS
+    system = AgentSystem(db_path, counter, disabled=disabled, agent_generators=agent_generators) if uses_agents else None
     records = []
     for set_name, questions in question_sets.items():
         for question in questions:
@@ -169,7 +185,7 @@ def latex_table(summaries: dict[str, dict[str, Any]]) -> str:
         r"\textbf{Configuración} & sql & answer & e2e & sql & answer & e2e & \textbf{Llamadas} \\",
         r"\midrule",
     ]
-    for config in ("baseline", "d2", "agentes_v1", "agentes") + ABLATIONS:
+    for config in ("baseline", "d2", "agentes_v1", "agentes") + ABLATIONS + D4_CONFIGS:
         if config not in summaries:
             continue
         row = [LABELS[config]]
@@ -201,4 +217,4 @@ def load_results(
     return summaries
 
 
-__all__ = ["CONFIGS", "ABLATIONS", "run_config", "summarize", "latex_table", "load_results"]
+__all__ = ["CONFIGS", "ABLATIONS", "D4_CONFIGS", "run_config", "summarize", "latex_table", "load_results"]

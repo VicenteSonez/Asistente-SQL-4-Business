@@ -22,6 +22,7 @@ from sql4business.agents import (
     uncovered_periods,
 )
 from sql4business.composition import ComposedAnswer
+from sql4business.icl_control import RetrievalFewShotPlanner, load_examples
 from sql4business.evaluation_d3 import CONFIGS, latex_table, run_config
 from sql4business.sql_tools import lint_sql
 
@@ -43,6 +44,7 @@ def fix(step, sql):
     return json.dumps({"action": "fix", "step": step, "sql": sql})
 
 
+ICL_EXAMPLES = load_examples(ROOT / "data" / "finetune" / "train.jsonl")[:50]
 GROWTH_PERIODS = (("2026-03-01", "2026-05-31"), ("2026-06-01", "2026-08-31"))
 
 
@@ -332,11 +334,17 @@ class EvaluationTests(unittest.TestCase):
         summaries = {}
         with tempfile.TemporaryDirectory() as folder:
             for config in CONFIGS:
+                planner = {"agentes_ft": OracleGenerator(),
+                           "control_icl": RetrievalFewShotPlanner(OracleGenerator(), ICL_EXAMPLES)}.get(config)
                 result = run_config(config, OracleGenerator(), DB, sets, OFFICIAL["schema"],
-                                    trace_dir=folder if config == "agentes" else None, progress=lambda _: None)
+                                    trace_dir=folder if config == "agentes" else None, progress=lambda _: None,
+                                    planner_generator=planner)
                 summaries[config] = result["summary"]
             self.assertEqual(len(list(Path(folder).glob("*.json"))), 6)
         self.assertEqual(summaries["agentes"]["official"]["e2e"]["global"], [4, 4])
+        self.assertEqual(summaries["agentes_ft"]["official"]["e2e"]["global"], [4, 4])
+        self.assertEqual(summaries["control_icl"]["official"]["e2e"]["global"], [4, 4])
+        self.assertEqual(summaries["agentes_ft"]["official"]["model_calls"], summaries["agentes"]["official"]["model_calls"])
         self.assertNotIn("e2e", summaries["baseline"]["official"])
         self.assertEqual(summaries["sin_critic"]["official"]["model_calls"], 2.0)
         table = latex_table(summaries)

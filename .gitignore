@@ -7,3 +7,6 @@ __pycache__/
 *.zip
 *.exe
 results/trace*.json
+
+# Deliverable 4: the adapter weights live on Hugging Face
+*.safetensors

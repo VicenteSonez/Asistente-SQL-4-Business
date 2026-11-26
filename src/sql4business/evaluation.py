@@ -224,7 +224,7 @@ def environment(generator: Any = None) -> dict[str, Any]:
     """Versions, hardware and code revision behind a run."""
 
     info: dict[str, Any] = {"python": platform.python_version()}
-    for module in ("torch", "transformers", "accelerate", "bitsandbytes"):
+    for module in ("torch", "transformers", "accelerate", "bitsandbytes", "peft"):
         try:
             info[module] = __import__(module).__version__
         except ImportError:

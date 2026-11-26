@@ -1,0 +1,161 @@
+\documentclass[10pt]{article}
+\usepackage[a4paper,margin=0.9cm,top=0.7cm,bottom=0.7cm,columnsep=0.45cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{multicol}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usetikzlibrary{positioning,arrows.meta,calc}
+
+\definecolor{ucblue}{RGB}{0,51,102}
+\definecolor{ftorange}{RGB}{204,85,0}
+\definecolor{toolgray}{RGB}{110,110,110}
+\hypersetup{colorlinks=true,urlcolor=ucblue,linkcolor=ucblue}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1.5pt}
+\pagestyle{empty}
+\newcommand{\head}[1]{\textbf{\color{ucblue}#1}\hspace{0.4em}}
+\newcommand{\pendiente}[1]{\textcolor{red}{[PENDIENTE: #1]}}
+% Completar después de la corrida en Colab (ver README, "Cómo reproducir el Deliverable 4").
+\newcommand{\VideoURL}{\pendiente{link del video}}
+\newcommand{\HFURL}{\pendiente{link Hugging Face}}
+\newcommand{\LOSSCSV}{../results/deliverable4/adapter/loss.csv}
+
+\begin{document}
+
+\begin{center}
+{\Large\bfseries\color{ucblue} SQL4Business: Deliverable 4 --- fine-tuning del Planificador}\\[1pt]
+{\small Generative Artificial Intelligence (580694), Universidad de Concepci\'on}\\[1pt]
+{\small Aredhel Jim\'enez, Bryan Riquelme, Guido Salazar, Vicente So\~nez}\\[1pt]
+{\small C\'odigo: \href{https://github.com/aredhel-jmze/Asistente-SQL-4-Business}{github.com/aredhel-jmze/Asistente-SQL-4-Business}
+\quad$\vert$\quad Adaptador: \HFURL \quad$\vert$\quad Video: \VideoURL}
+\end{center}
+
+\vspace{-6pt}
+\begin{center}
+\begin{tikzpicture}[
+  font=\scriptsize,
+  agent/.style={draw=ucblue, fill=ucblue!8, very thick, rounded corners=3pt, align=center, minimum height=2.4em, text width=2.35cm, inner sep=2pt},
+  ft/.style={agent, draw=ftorange, fill=ftorange!12, line width=1.6pt},
+  tool/.style={draw=toolgray, dashed, rounded corners=1pt, align=center, font=\tiny, inner sep=1.5pt, minimum height=1.5em},
+  ext/.style={draw=black!60, fill=black!4, rounded corners=6pt, align=center, minimum height=2.4em, text width=1.15cm, inner sep=2pt},
+  flow/.style={-{Stealth[length=4pt]}, thick, ucblue},
+  back/.style={-{Stealth[length=4pt]}, thick, red!70!black},
+  use/.style={{Stealth[length=3pt]}-{Stealth[length=3pt]}, toolgray},
+  lab/.style={font=\tiny, inner sep=1pt, align=center}]
+  \node[ext] (u) {Usuario\\(gerente)};
+  \node[ft, right=0.9cm of u] (p) {\textbf{Planificador}\\{\tiny Qwen 3B + \textbf{LoRA (D4)}}};
+  \node[agent, right=1.45cm of p] (a) {\textbf{Analista SQL}\\{\tiny Qwen 3B base}};
+  \node[agent, right=1.45cm of a] (r) {\textbf{Reportero}\\{\tiny Qwen 3B base}};
+  \node[agent, right=1.1cm of r] (v) {\textbf{Verificador}\\{\tiny Qwen 3B base}};
+  \node[ext, right=0.9cm of v] (o) {Respuesta\\final};
+  \node[tool, above=0.35cm of p] (t1) {leer\_esquema};
+  \node[tool, below=0.35cm of a] (t3) {revisar\_sql $\cdot$ ejecutar\_sql $\cdot$ componer};
+  \node[tool, above=0.35cm of v] (t5) {forma $\cdot$ períodos $\cdot$ filtros $\cdot$ fidelidad};
+  \draw[flow] (u) -- node[lab, above] {pregunta} (p);
+  \draw[flow] (p) -- node[lab, above] {plan JSON} (a);
+  \draw[flow] (a) -- node[lab, above] {resultado} (r);
+  \draw[flow] (r) -- node[lab, above] {reporte} (v);
+  \draw[flow] (v) -- node[lab, above] {acepta} (o);
+  \draw[use] (t1) -- (p); \draw[use] (t3) -- (a); \draw[use] (t5) -- (v);
+  \draw[back] (a.north) .. controls +(0,0.75) and +(0.4,0.75) .. node[lab, above] {error: replanificar ($\leq$2)} (p.north east);
+  \draw[back] (v.south) .. controls +(-0.2,-0.7) and +(0.2,-0.7) .. node[lab, below] {reescribir ($\leq$2)} (r.south);
+  \draw[back, ftorange, line width=1.2pt] ($(v.south)+(0.6,0)$) -- ++(0,-1.0) -| node[lab, pos=0.25, below, text=ftorange] {\textbf{retroalimentación + plan anterior: replanificar ($\leq$1) --- aquí el Planificador base repetía su plan (D3)}} ($(p.south)+(0.3,0)$);
+\end{tikzpicture}
+\end{center}
+\vspace{-9pt}
+{\tiny Naranja: el agente ajustado (adaptador LoRA sobre el mismo modelo base, cargado una vez; los otros tres agentes usan los pesos base) y el ciclo que debía corregir. Prompts versionados en \texttt{prompts/}; sin cambios respecto del D3.}
+
+\vspace{-2pt}
+\begin{multicols}{2}
+\small
+
+\head{Tarea, falla y continuidad.} La misma tarea (pregunta de negocio $\rightarrow$ consultas SQL
+necesarias y reporte fiel), la misma falla diagnosticada en el D1 (planificar preguntas combinadas:
+0/5 con prompting directo) y el mismo sistema de cuatro agentes del D3, con el mismo modelo
+(\texttt{Qwen2.5-Coder-3B-Instruct}, rev.\ \texttt{488639f}, NF4, greedy, T4) y el mismo criterio de
+evaluación (\textit{sql}, \textit{answer}, \textit{e2e}).
+
+\head{Elección del agente: el Planificador.} En la corrida final del D3, las 4 preguntas que el
+sistema falla (q04, q10, q12, q11-p) nacen en un plan del Planificador; el Analista, el Reportero y
+el Verificador no originan ningún error. Además, en 4 de las 6 veces que el Verificador o el Analista
+le devolvieron el plan con el motivo exacto (``growth\_pct needs the earlier period first'', ``the
+question names `Alimentos'\,''), el Planificador devolvió \emph{el mismo SQL}. El D3 ya agotó la vía
+del prompting: few-shot, descomposición, controles nuevos del Verificador y un ejemplo más en v2;
+detectar funciona, corregir no. Con decodificación greedy, el sesgo por el orden en que la pregunta
+nombra los meses domina el texto de la retroalimentación. Por eso la intervención es sobre los
+pesos: enseñar con ejemplos (a)~a ordenar los períodos por tiempo y no por mención, y (b)~a
+\emph{usar} la retroalimentación del Verificador. El control mide si los mismos datos, dados como
+prompt, bastan.
+
+\head{Datos.} 1.282 pares (entrada, salida) para el rol del Planificador
+(\texttt{data/finetune/}, regenerables con \texttt{scripts/build\_planner\_data.py}, semilla 4).
+\textit{Entrada}: el prompt exacto que lee el Planificador en ejecución (esquema enriquecido,
+técnicas del D3, pregunta). \textit{Salida}: el plan JSON correcto. \textit{Fuente}: plantillas de
+preguntas (86\,\% español, 14\,\% inglés; con y sin tildes) sobre \texttt{business.db}, en 8 familias
+(valor, líder, ficha, listado, crecimiento, participación, comparación de líderes, filtro + ranking).
+\textit{Etiquetado}: ningún modelo escribe salidas; cada plan lo construye el código a partir de los
+parámetros de la tarea, se ejecuta con las herramientas del Analista y se compara con un valor de
+referencia calculado en Python sobre las tablas (0 discrepancias; se descartan empates).
+883 ejemplos de \emph{plan} (51\,\% de los de crecimiento nombran primero el período posterior, como
+q12) y 399 de \emph{reparación}: plan equivocado (orden invertido, filtro de categoría omitido,
+participación como crecimiento, dos valores con \texttt{direct}, crecimiento en vez de comparar
+líderes, listado en vez del primero, mes corrido) + la retroalimentación que produce la propia
+función del Verificador $\rightarrow$ plan correcto. \textit{Revisión manual}: muestra de 60
+ejemplos (\texttt{revision\_manual.csv}) \pendiente{N/60 correctos, revisores}.
+\textit{Separación}: de 4.737 tareas candidatas se eliminaron 216 con la misma operación y
+resultados que una pregunta de evaluación, 182 con algún paso numérico igual a un paso de
+evaluación y 52 con similitud de 5-gramas $\geq 0{,}5$; la máxima similitud que queda es 0,19 (con
+q15-p). Train/dev (1.155/127) se separan por cálculo; un test lo comprueba.
+
+\head{Entrenamiento.} QLoRA (\texttt{scripts/train\_planner.py}, bucle propio en PyTorch + PEFT
+0.22): base NF4 de 4 bits, LoRA $r{=}16$, $\alpha{=}32$, dropout 0,05 en
+\texttt{q,k,v,o,gate,up,down\_proj}; AdamW, lr $2\cdot10^{-4}$, calentamiento 5\,\% + coseno,
+2 épocas, lote efectivo 8 (lote 1 $\times$ 8 acumulaciones), \pendiente{N} pasos, fp16,
+gradient checkpointing, largo máx.\ 2.560 tokens (máx.\ real 2.243). La pérdida es la entropía
+cruzada solo sobre los tokens del plan (el prompt se enmascara). Hardware: \pendiente{GPU}, tiempo
+\pendiente{min}. Pérdida dev: \pendiente{inicial $\rightarrow$ final}.
+
+\begin{center}
+\IfFileExists{\LOSSCSV}{%
+\begin{tikzpicture}
+\begin{axis}[width=0.98\columnwidth, height=3.9cm, font=\tiny, xlabel={paso del optimizador}, ylabel={pérdida},
+  legend style={font=\tiny, at={(0.98,0.95)}, anchor=north east, draw=none, fill=none}, ymin=0,
+  xlabel style={yshift=3pt}, ylabel style={yshift=-4pt}, unbounded coords=discard]
+\addplot[ucblue!60, thin] table[x=step, y=train_loss, col sep=comma] {\LOSSCSV};
+\addplot[ftorange, thick, mark=*, mark size=1pt] table[x=step, y=dev_loss, col sep=comma] {\LOSSCSV};
+\legend{entrenamiento, validación (dev)}
+\end{axis}
+\end{tikzpicture}}{\fbox{\parbox{0.9\columnwidth}{\centering\pendiente{curva de pérdida: falta \texttt{results/deliverable4/adapter/loss.csv}}}}}
+\end{center}
+
+\head{Resultados.} \pendiente{completar con la tabla: qué gana el sistema (4) frente a (3) en e2e, en
+combinadas, en q12/q04/q11-p; cuántas veces el Planificador repitió un plan devuelto (D3: 4 de 6);
+y si el control con los mismos datos en el prompt logra lo mismo.} Con 27 preguntas, 1 o 2 de
+diferencia es una tendencia; el detalle por pregunta está en \texttt{por\_pregunta.md}.
+
+\head{Caso de falla.} \pendiente{una entrada donde el sistema con el Planificador ajustado aún falla o
+empeora, por qué, y la ruta de su traza en \texttt{results/deliverable4/trazas\_agentes\_ft/}.}
+
+\head{Límites y desviaciones.} Datos sintéticos de plantillas: el ajuste aprende el estilo de
+esas preguntas; las paráfrasis y el inglés miden cuánto generaliza. La familia de q12 está en el
+entrenamiento (otros meses, productos y categorías, nunca el mismo cálculo). Entrenamiento en fp16
+(el T4 no tiene bf16) e inferencia como en el D3. Para reproducir: \texttt{notebooks/deliverable4\_finetune.ipynb}.
+
+\end{multicols}
+
+\vspace{-6pt}
+\begin{center}
+\small
+\IfFileExists{deliverable4_results.tex}{\input{deliverable4_results.tex}}{\pendiente{tabla de resultados: falta \texttt{docs/deliverable4\_results.tex} (la escribe \texttt{scripts/evaluate\_d4.py})}}\\[1pt]
+{\scriptsize Las mismas 27 preguntas y criterios para los cinco. \textit{Comb.}: e2e en las 12 combinadas. \textit{Llam.}: llamadas al modelo por pregunta.
+Control: pesos base; el Planificador recibe en su prompt los 4 ejemplos de entrenamiento más parecidos (mismos datos que el ajuste).}
+\end{center}
+
+\end{document}

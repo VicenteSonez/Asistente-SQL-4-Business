@@ -1,0 +1,49 @@
+{
+ "seed": 4,
+ "source": "plantillas de preguntas sobre data/business.db; planes construidos por código (sin modelo generador)",
+ "candidate_tasks": 4737,
+ "removed": {
+  "referencia_distinta": 0,
+  "misma_tarea": 216,
+  "mismo_resultado_numerico": 182,
+  "pregunta_similar": 52
+ },
+ "kept_tasks": 4287,
+ "examples": 1282,
+ "train": 1155,
+ "dev": 127,
+ "by_kind": {
+  "plan": 883,
+  "repair": 399
+ },
+ "by_family": {
+  "comparacion": 183,
+  "crecimiento": 277,
+  "directa_ficha": 29,
+  "directa_lider": 166,
+  "directa_lista": 8,
+  "directa_valor": 271,
+  "filtro_ranking": 90,
+  "participacion": 258
+ },
+ "by_repair": {
+  "comparacion_como_crecimiento": 57,
+  "filtro_faltante": 57,
+  "listado": 57,
+  "mes_corrido": 57,
+  "orden_invertido": 57,
+  "parte_como_crecimiento": 57,
+  "valores_descartados": 57
+ },
+ "by_language": {
+  "en": 184,
+  "es": 1098
+ },
+ "growth_later_first": 140,
+ "growth_total": 277,
+ "max_question_similarity_to_eval": {
+  "question_id": "q15-p",
+  "jaccard_5gram": 0.191
+ },
+ "review_sample": 60
+}
