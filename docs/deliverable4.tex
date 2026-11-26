@@ -24,7 +24,7 @@
 \newcommand{\pendiente}[1]{\textcolor{red}{[PENDIENTE: #1]}}
 % Completar después de la corrida en Colab (ver README, "Cómo reproducir el Deliverable 4").
 \newcommand{\VideoURL}{\pendiente{link del video}}
-\newcommand{\HFURL}{\pendiente{link Hugging Face}}
+\newcommand{\HFURL}{\href{https://huggingface.co/vicentesonez/sql4business-planificador-qlora}{huggingface.co/vicentesonez/sql4business-planificador-qlora}}
 \newcommand{\LOSSCSV}{../results/deliverable4/adapter/loss.csv}
 
 \begin{document}
@@ -81,7 +81,7 @@ necesarias y reporte fiel), la misma falla diagnosticada en el D1 (planificar pr
 0/5 con prompting directo) y el mismo sistema de cuatro agentes del D3, con el Verificador antes del
 Reportero (comentario al D3: las 27 trazas del D3 reproducen sin GPU los mismos planes y resultados con
 este orden; (3), (4) y el control se evalúan con él), con el mismo modelo
-(\texttt{Qwen2.5-Coder-3B-Instruct}, rev.\ \texttt{488639f}, NF4, greedy, T4) y el mismo criterio de
+(\texttt{Qwen2.5-Coder-3B-Instruct}, rev.\ \texttt{488639f}, NF4, greedy) y el mismo criterio de
 evaluación (\textit{sql}, \textit{answer}, \textit{e2e}).
 
 \head{Elección del agente: el Planificador.} En la corrida final del D3, las 4 preguntas que el
@@ -109,8 +109,8 @@ referencia calculado en Python sobre las tablas (0 discrepancias; se descartan e
 q12) y 399 de \emph{reparación}: plan equivocado (orden invertido, filtro de categoría omitido,
 participación como crecimiento, dos valores con \texttt{direct}, crecimiento en vez de comparar
 líderes, listado en vez del primero, mes corrido) + la retroalimentación que produce la propia
-función del Verificador $\rightarrow$ plan correcto. \textit{Revisión manual}: muestra de 60
-ejemplos (\texttt{revision\_manual.csv}) \pendiente{N/60 correctos, revisores}.
+función del Verificador $\rightarrow$ plan correcto. \textit{Revisión}: ningún modelo genera
+datos, así que no hay salidas generadas que revisar a mano; los 1.282 pares se verifican por ejecución.
 \textit{Separación}: de 4.737 tareas candidatas se eliminaron 216 con la misma operación y
 resultados que una pregunta de evaluación, 182 con algún paso numérico igual a un paso de
 evaluación y 52 con similitud de 5-gramas $\geq 0{,}5$; la máxima similitud que queda es 0,19 (con
@@ -119,16 +119,18 @@ q15-p). Train/dev (1.155/127) se separan por cálculo; un test lo comprueba.
 \head{Entrenamiento.} QLoRA (\texttt{scripts/train\_planner.py}, bucle propio en PyTorch + PEFT
 0.22): base NF4 de 4 bits, LoRA $r{=}16$, $\alpha{=}32$, dropout 0,05 en
 \texttt{q,k,v,o,gate,up,down\_proj}; AdamW, lr $2\cdot10^{-4}$, calentamiento 5\,\% + coseno,
-2 épocas, lote efectivo 8 (lote 1 $\times$ 8 acumulaciones), \pendiente{N} pasos, fp16,
-gradient checkpointing, largo máx.\ 2.560 tokens (máx.\ real 2.243). La pérdida es la entropía
-cruzada solo sobre los tokens del plan (el prompt se enmascara). Hardware: \pendiente{GPU}, tiempo
-\pendiente{min}. Pérdida dev: \pendiente{inicial $\rightarrow$ final}.
+2 épocas, lote efectivo 8 (lote 1 $\times$ 8 acumulaciones), 290 pasos, bf16,
+gradient checkpointing, largo máx.\ 2.560 tokens (máx.\ real 2.243); 29,9\,M parámetros entrenables. La
+pérdida es la entropía cruzada solo sobre los tokens del plan (el prompt se enmascara). Hardware: una
+NVIDIA H100 80\,GB en Modal, 16,7 min (\texttt{training\_log.json}). Pérdida dev: 0,158 $\rightarrow$
+0,0002; a los 25 pasos ya es 0,009: las plantillas se aprenden rápido, y por eso las paráfrasis son la
+prueba que importa.
 
 \begin{center}
 \IfFileExists{\LOSSCSV}{%
 \begin{tikzpicture}
-\begin{axis}[width=0.98\columnwidth, height=3.9cm, font=\tiny, xlabel={paso del optimizador}, ylabel={pérdida},
-  legend style={font=\tiny, at={(0.98,0.95)}, anchor=north east, draw=none, fill=none}, ymin=0,
+\begin{axis}[width=0.98\columnwidth, height=3.9cm, font=\tiny, xlabel={paso del optimizador}, ylabel={pérdida (log)},
+  legend style={font=\tiny, at={(0.98,0.95)}, anchor=north east, draw=none, fill=none}, ymode=log,
   xlabel style={yshift=3pt}, ylabel style={yshift=-4pt}, unbounded coords=discard]
 \addplot[ucblue!60, thin] table[x=step, y=train_loss, col sep=comma] {\LOSSCSV};
 \addplot[ftorange, thick, mark=*, mark size=1pt] table[x=step, y=dev_loss, col sep=comma] {\LOSSCSV};
@@ -147,8 +149,11 @@ empeora, por qué, y la ruta de su traza en \texttt{results/deliverable4/trazas\
 
 \head{Límites y desviaciones.} Datos sintéticos de plantillas: el ajuste aprende el estilo de
 esas preguntas; las paráfrasis y el inglés miden cuánto generaliza. La familia de q12 está en el
-entrenamiento (otros meses, productos y categorías, nunca el mismo cálculo). Entrenamiento en fp16
-(el T4 no tiene bf16) e inferencia como en el D3. Para reproducir: \texttt{notebooks/deliverable4\_finetune.ipynb}.
+entrenamiento (otros meses, productos y categorías, nunca el mismo cálculo). \textit{Hardware}: D1--D3
+se midieron en un T4 de Colab; el D4 entrena y evalúa en un H100 de Modal (bf16; greedy reproduce
+salidas solo en el mismo hardware). Los cinco sistemas de la tabla corren en la misma sesión, así que la
+comparación es interna; (1)--(3) pueden diferir de los números del D3. Para reproducir:
+\texttt{scripts/modal\_d4.py} (Modal) o \texttt{notebooks/deliverable4\_finetune.ipynb} (Colab).
 
 \end{multicols}
 
