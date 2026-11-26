@@ -29,7 +29,7 @@ import modal
 ROOT = Path(__file__).resolve().parents[1]
 REPO_URL = "https://github.com/VicenteSonez/Asistente-SQL-4-Business.git"
 DEFAULT_REF = "deliverable4"
-HF_REPO = "VicenteSonez/sql4business-planificador-qlora"
+HF_REPO = "vicentesonez/sql4business-planificador-qlora"
 GPU = "H100"
 WORKDIR = "/root/repo"
 
