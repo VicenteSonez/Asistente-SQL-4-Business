@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO_URL = "https://github.com/VicenteSonez/Asistente-SQL-4-Business.git"
 DEFAULT_REF = "deliverable4"
 HF_REPO = "vicentesonez/sql4business-planificador-qlora"
-GPU = "H100"
+GPU = "H100!"  # "!" stops Modal from upgrading to an H200: same hardware for training and evaluation
 WORKDIR = "/root/repo"
 
 
