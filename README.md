@@ -11,7 +11,7 @@ Generative Artificial Intelligence (580694), Universidad de Concepción.
 | Deliverable 1 | [`docs/deliverable1.pdf`](docs/deliverable1.pdf) | [`notebooks/baseline_eval.ipynb`](notebooks/baseline_eval.ipynb) |
 | Deliverable 2 | [`docs/deliverable2.pdf`](docs/deliverable2.pdf) · [video](https://drive.google.com/file/d/1ovemshyIkbVYasXr7zaFDXIrdrHN7OH5/view) | [`notebooks/deliverable2_demo.ipynb`](notebooks/deliverable2_demo.ipynb) |
 | Deliverable 3 | [`docs/deliverable3.pdf`](docs/deliverable3.pdf) · [video](https://drive.google.com/file/d/1I9KuGPZe99HninfvLdC2E1XQjTf00EQZ/view?usp=sharing) | [`notebooks/deliverable3_demo.ipynb`](notebooks/deliverable3_demo.ipynb) |
-| Deliverable 4 | [`docs/deliverable4.pdf`](docs/deliverable4.pdf) · video: **PENDIENTE** · adaptador: **PENDIENTE (Hugging Face)** | [`notebooks/deliverable4_finetune.ipynb`](notebooks/deliverable4_finetune.ipynb) |
+| Deliverable 4 | [`docs/deliverable4.pdf`](docs/deliverable4.pdf) · video: **PENDIENTE** · adaptador: [`vicentesonez/sql4business-planificador-qlora`](https://huggingface.co/vicentesonez/sql4business-planificador-qlora) | [`scripts/modal_d4.py`](scripts/modal_d4.py) (Modal, corrida medida) · [`notebooks/deliverable4_finetune.ipynb`](notebooks/deliverable4_finetune.ipynb) (Colab) |
 
 ## Definición de la tarea
 
@@ -49,7 +49,8 @@ El Deliverable 4 ajusta (QLoRA) el modelo del **Planificador** del sistema de ag
 tres agentes siguen con el modelo base; el adaptador se carga una sola vez sobre el mismo modelo
 (`Qwen/Qwen2.5-Coder-3B-Instruct`, revisión `488639f`, NF4) y se apaga para ellos.
 
-- **Adaptador publicado:** **PENDIENTE** (`results/deliverable4/adapter_hf.json` guarda el repo y la revisión exacta).
+- **Adaptador publicado:** [`vicentesonez/sql4business-planificador-qlora`](https://huggingface.co/vicentesonez/sql4business-planificador-qlora), revisión `0b5a6a6` (`results/deliverable4/adapter_hf.json` guarda el repo y la
+  revisión exacta; la evaluación descarga esa revisión, así que los resultados son los de esos pesos).
 - **Video:** **PENDIENTE**.
 
 ### Por qué el Planificador (evidencia del D3)
@@ -81,7 +82,7 @@ que la salida es idéntica a la versionada. Código: [`src/sql4business/finetune
 | Cómo se produce cada salida | **por código, sin ningún modelo generador**: el plan se construye a partir de los parámetros de la tarea, se ejecuta con las herramientas del Analista (validación, SQLite de solo lectura, composición) y se compara con un valor de referencia calculado en Python sobre las tablas; 0 discrepancias; se descartan empates |
 | Tamaño | 1.282 ejemplos: 883 de plan y 399 de reparación; train 1.155 / dev 127, separados por cálculo |
 | Reparación | 7 tipos de plan equivocado (×57): orden invertido (q12), filtro omitido (q04), participación como crecimiento (q11-p), dos valores con `direct` (q11), crecimiento en vez de comparar líderes (q10), listado en vez del primero (q03), mes corrido. La retroalimentación es la que produce `critic_problems`, la misma función del Verificador |
-| Revisión manual | muestra de 60 ejemplos en `data/finetune/revision_manual.csv`: **PENDIENTE** (revisores, N/60 correctos) |
+| Revisión | ningún modelo genera datos, así que no hay salidas generadas que revisar a mano: los 1.282 pares se verifican por ejecución (fila anterior). `data/finetune/revision_manual.csv` queda como muestra legible de 60 ejemplos |
 | Separación de la evaluación | de 4.737 tareas candidatas se eliminan 216 con la misma operación y resultados que una pregunta evaluada, 182 con algún paso numérico igual a un paso evaluado y 52 con similitud de 5-gramas ≥ 0,5. Máxima similitud restante: 0,19 (q15-p). `tests/test_finetune_data.py` lo comprueba |
 
 Resumen completo en [`data/finetune/reporte.json`](data/finetune/reporte.json).
@@ -90,10 +91,21 @@ Resumen completo en [`data/finetune/reporte.json`](data/finetune/reporte.json).
 
 QLoRA con un bucle propio en PyTorch + PEFT 0.22: base NF4 de 4 bits; LoRA r=16, α=32, dropout 0,05 en
 `q,k,v,o,gate,up,down_proj`; AdamW, lr 2e-4, 5 % de calentamiento y coseno; 2 épocas; lote efectivo 8;
-fp16 (el T4 no tiene bf16); gradient checkpointing; largo máximo 2.560 tokens (el mayor ejemplo tiene
-2.243). La pérdida se calcula solo sobre los tokens del plan. Salidas en `results/deliverable4/adapter/`:
-`loss.csv`, `training_log.json` (configuración, hardware, versiones, tiempo) y la tarjeta del modelo.
-Los pesos (`*.safetensors`) no se versionan en git: están en Hugging Face.
+bf16 (`--dtype auto`: bf16 si la GPU lo tiene, fp16 en un T4); gradient checkpointing; largo máximo 2.560
+tokens (el mayor ejemplo tiene 2.243). La pérdida se calcula solo sobre los tokens del plan. Salidas en
+`results/deliverable4/adapter/`: `loss.csv`, `training_log.json` (configuración, hardware, versiones,
+tiempo) y la tarjeta del modelo. Los pesos (`*.safetensors`) no se versionan en git: están en Hugging Face.
+
+| Corrida medida (26-11-2026, commit `42b2a12`) | |
+|---|---|
+| Hardware | NVIDIA H100 80 GB en Modal (`scripts/modal_d4.py`), bf16 |
+| Pasos / tiempo | 290 pasos (2 épocas × 145), 16,7 min |
+| Parámetros entrenables | 29,9 M (LoRA r=16 en las 7 proyecciones) |
+| Pérdida dev | 0,158 antes de entrenar → 0,009 a los 25 pasos → 0,0002 al final |
+| Versiones | torch 2.11.0, transformers 5.17.0, peft 0.22.0, bitsandbytes 0.50.2 |
+
+La pérdida dev cae casi a cero en pocos pasos: el Planificador aprende rápido el formato de las
+plantillas. Por eso las paráfrasis externas son la prueba que importa, no la pérdida.
 
 ### Evaluación ([`scripts/evaluate_d4.py`](scripts/evaluate_d4.py))
 
@@ -118,6 +130,21 @@ su traza en `results/deliverable4/trazas_agentes_ft/`.
 
 ### Cómo reproducir el Deliverable 4
 
+**Ruta medida: Modal (H100).** Requiere `pip install modal`, `modal setup` y, solo para publicar, un
+secreto `huggingface` con un token de escritura (`modal secret create huggingface HF_TOKEN=...`). Cada
+comando clona el repositorio en un ref empujado (`--ref`, por defecto `deliverable4`) y deja los
+resultados en las mismas rutas de este repositorio:
+
+```
+modal run scripts/modal_d4.py::train                 # QLoRA en H100 (~17 min) y publicación en Hugging Face
+modal run scripts/modal_d4.py::evaluate              # cinco sistemas, 27 preguntas
+modal run scripts/modal_d4.py::demo --ids q12,q11-p  # lo que muestra el video
+```
+
+Para solo reproducir los resultados no hace falta entrenar: `evaluate` descarga el adaptador publicado.
+
+**Ruta alternativa: Colab.**
+
 1. Abrir [`notebooks/deliverable4_finetune.ipynb`](https://colab.research.google.com/github/aredhel-jmze/Asistente-SQL-4-Business/blob/deliverable4/notebooks/deliverable4_finetune.ipynb) en Colab con GPU T4
    (mientras el D4 esté en la rama `deliverable4`; el notebook usa `REF = "deliverable4"`, cambiarlo a `main` tras el merge).
 2. **Datos** (sin GPU): `python scripts/build_planner_data.py`.
@@ -132,7 +159,33 @@ su traza en `results/deliverable4/trazas_agentes_ft/`.
 
 ### Cambios en el código del D3
 
-Solo dos, sin cambiar ninguna decisión (los tests que reproducen las 27 trazas de v2 siguen pasando):
+**Orden del Verificador (comentario del profesor al D3).** En el D3 el Analista entregaba un "resultado
+verificado" directo al Reportero, y el Verificador revisaba todo al final, aunque sus controles del plan
+(forma, períodos, filtros) no leen el reporte. Ahora el orden es Analista → Verificador (¿el resultado
+responde la pregunta? si no, replanificar) → Reportero → Verificador (¿el reporte es fiel? si no,
+reescribir) → usuario:
+
+```mermaid
+flowchart LR
+    U([Usuario]) -->|"pregunta"| P[Planificador · LoRA D4]
+    P -->|"plan JSON"| A[Analista SQL]
+    A -->|"resultado ejecutado"| V1[Verificador: resultado]
+    V1 -->|"resultado verificado"| R[Reportero]
+    R -->|"reporte"| V2[Verificador: fidelidad]
+    V2 -->|"acepta"| F([Respuesta final])
+    V1 -.->|"no responde la pregunta: replanificar ≤ 1"| P
+    V2 -.->|"cifras no fieles: reescribir ≤ 2"| R
+    A -.->|"error: replanificar ≤ 2"| P
+```
+
+Las decisiones y la retroalimentación son las mismas: `tests/test_agents.py` reproduce sin GPU las 27
+trazas de la corrida v2 del D3 con el nuevo orden y obtiene los mismos planes, la misma retroalimentación
+al Planificador, el mismo resultado y el mismo estado. Cambian dos cosas: el Reportero ya no redacta un
+resultado que vuelve al Planificador (menos llamadas), y el reporte de respaldo (cuando el plan nuevo
+falla) ahora también pasa por el chequeo de fidelidad; en el D3 quedaba sin verificar. Los sistemas (3),
+(4) y el control del D4 se evalúan con este orden.
+
+Además, dos cambios sin efecto en las decisiones:
 los controles del Verificador se extrajeron a `critic_problems` (para que los datos usen su mismo texto),
 y `AgentSystem` acepta un generador propio por agente (`agent_generators`). Además, el modelo base queda
 fijado en la revisión `488639f`, la evaluada desde el D2.
