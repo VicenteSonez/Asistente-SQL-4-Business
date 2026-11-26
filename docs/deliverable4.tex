@@ -52,25 +52,25 @@
   \node[ext] (u) {Usuario\\(gerente)};
   \node[ft, right=0.9cm of u] (p) {\textbf{Planificador}\\{\tiny Qwen 3B + \textbf{LoRA (D4)}}};
   \node[agent, right=1.45cm of p] (a) {\textbf{Analista SQL}\\{\tiny Qwen 3B base}};
-  \node[agent, right=1.45cm of a] (r) {\textbf{Reportero}\\{\tiny Qwen 3B base}};
-  \node[agent, right=1.1cm of r] (v) {\textbf{Verificador}\\{\tiny Qwen 3B base}};
-  \node[ext, right=0.9cm of v] (o) {Respuesta\\final};
+  \node[agent, right=1.6cm of a] (v) {\textbf{Verificador}\\{\tiny Qwen 3B base}};
+  \node[agent, right=2.5cm of v] (r) {\textbf{Reportero}\\{\tiny Qwen 3B base}};
+  \node[ext, below=0.75cm of r] (o) {Respuesta\\final};
   \node[tool, above=0.35cm of p] (t1) {leer\_esquema};
   \node[tool, below=0.35cm of a] (t3) {revisar\_sql $\cdot$ ejecutar\_sql $\cdot$ componer};
   \node[tool, above=0.35cm of v] (t5) {forma $\cdot$ períodos $\cdot$ filtros $\cdot$ fidelidad};
   \draw[flow] (u) -- node[lab, above] {pregunta} (p);
   \draw[flow] (p) -- node[lab, above] {plan JSON} (a);
-  \draw[flow] (a) -- node[lab, above] {resultado} (r);
-  \draw[flow] (r) -- node[lab, above] {reporte} (v);
-  \draw[flow] (v) -- node[lab, above] {acepta} (o);
+  \draw[flow] (a) -- node[lab, above] {resultado\\ejecutado} (v);
+  \draw[flow] ($(v.east)+(0,0.12)$) -- node[lab, above=1pt] {resultado verificado\\o problemas ($\leq$2)} ($(r.west)+(0,0.12)$);
+  \draw[flow] ($(r.west)+(0,-0.12)$) -- node[lab, below] {reporte} ($(v.east)+(0,-0.12)$);
+  \draw[flow] (v.south east) -- node[lab, below=2pt, sloped] {fiel: acepta} (o.west);
   \draw[use] (t1) -- (p); \draw[use] (t3) -- (a); \draw[use] (t5) -- (v);
   \draw[back] (a.north) .. controls +(0,0.75) and +(0.4,0.75) .. node[lab, above] {error: replanificar ($\leq$2)} (p.north east);
-  \draw[back] (v.south) .. controls +(-0.2,-0.7) and +(0.2,-0.7) .. node[lab, below] {reescribir ($\leq$2)} (r.south);
-  \draw[back, ftorange, line width=1.2pt] ($(v.south)+(0.6,0)$) -- ++(0,-1.0) -| node[lab, pos=0.25, below, text=ftorange] {\textbf{retroalimentación + plan anterior: replanificar ($\leq$1) --- aquí el Planificador base repetía su plan (D3)}} ($(p.south)+(0.3,0)$);
+  \draw[back, ftorange, line width=1.2pt] ($(v.south)+(-0.3,0)$) -- ++(0,-1.0) -| node[lab, pos=0.25, below, text=ftorange] {\textbf{no responde la pregunta: retroalimentación + plan anterior, replanificar ($\leq$1); el Planificador base repetía su plan (D3)}} ($(p.south)+(0.3,0)$);
 \end{tikzpicture}
 \end{center}
 \vspace{-9pt}
-{\tiny Naranja: el agente ajustado (adaptador LoRA sobre el mismo modelo base, cargado una vez; los otros tres agentes usan los pesos base) y el ciclo que debía corregir. Prompts versionados en \texttt{prompts/}; sin cambios respecto del D3.}
+{\tiny Naranja: el agente ajustado (adaptador LoRA sobre el mismo modelo base, cargado una vez; los otros tres agentes usan los pesos base) y el ciclo que debía corregir. Por el comentario al D3, el Verificador revisa el resultado antes de que el Reportero redacte y luego la fidelidad del reporte (antes revisaba todo al final). Prompts versionados en \texttt{prompts/}; el texto que lee el modelo no cambió.}
 
 \vspace{-2pt}
 \begin{multicols}{2}
@@ -78,7 +78,9 @@
 
 \head{Tarea, falla y continuidad.} La misma tarea (pregunta de negocio $\rightarrow$ consultas SQL
 necesarias y reporte fiel), la misma falla diagnosticada en el D1 (planificar preguntas combinadas:
-0/5 con prompting directo) y el mismo sistema de cuatro agentes del D3, con el mismo modelo
+0/5 con prompting directo) y el mismo sistema de cuatro agentes del D3, con el Verificador antes del
+Reportero (comentario al D3: las 27 trazas del D3 reproducen sin GPU los mismos planes y resultados con
+este orden; (3), (4) y el control se evalúan con él), con el mismo modelo
 (\texttt{Qwen2.5-Coder-3B-Instruct}, rev.\ \texttt{488639f}, NF4, greedy, T4) y el mismo criterio de
 evaluación (\textit{sql}, \textit{answer}, \textit{e2e}).
 
