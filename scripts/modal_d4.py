@@ -7,7 +7,9 @@ Volume ``sql4business-d4-results`` and returns them, so they land in this checko
 in the Volume and on Hugging Face, not in git.
 
     modal run scripts/modal_d4.py::train --smoke                 # short training check, publishes nothing
-    modal run scripts/modal_d4.py::train                         # QLoRA + push to Hugging Face
+    modal run scripts/modal_d4.py::check_hf                      # CPU, seconds: is the HF token able to write?
+    modal run scripts/modal_d4.py::train                         # QLoRA (H100), saved in the Volume, then published (CPU)
+    modal run scripts/modal_d4.py::publish --stamp <stamp>       # publish again from the Volume, no GPU
     modal run scripts/modal_d4.py::evaluate --limit 2 --configs agentes_ft   # smoke test (not saved here)
     modal run scripts/modal_d4.py::evaluate                      # four systems + control, 27 questions
     modal run scripts/modal_d4.py::demo --ids q12,q11-p          # base vs fine-tuned Planner, live messages
@@ -74,12 +76,12 @@ def _run(*args):
     subprocess.run([sys.executable, *args], cwd=WORKDIR, check=True)
 
 
-def _collect(*relative):
+def _collect(*relative, stamp=None):
     """Files under the given repo paths, without adapter weights; also copied to the results Volume."""
 
     import shutil
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = stamp or time.strftime("%Y%m%d-%H%M%S")
     files = {}
     for rel in relative:
         base = Path(WORKDIR) / rel
@@ -97,15 +99,58 @@ def _collect(*relative):
     return files
 
 
-@app.function(timeout=2 * 3600, secrets=[modal.Secret.from_name("huggingface")], **GPU_OPTIONS)
+@app.function(timeout=2 * 3600, **GPU_OPTIONS)
 def train_remote(ref, smoke):
+    """Trains and always keeps the adapter in the Volume (weights included) before anything else can fail.
+
+    Publishing is a separate CPU step (publish_remote), so a Hugging Face error never loses GPU work.
+    """
+
     _checkout(ref)
+    folder = "results/deliverable4/" + ("prueba_adapter" if smoke else "adapter")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    args = ["scripts/train_planner.py", "--output-dir", folder]
     if smoke:
-        _run("scripts/train_planner.py", "--limit", "16", "--epochs", "1", "--eval-every", "1",
-             "--output-dir", "results/deliverable4/prueba_adapter")
-        return _collect("results/deliverable4/prueba_adapter")
-    _run("scripts/train_planner.py", "--push-to-hub", HF_REPO)
-    return _collect("results/deliverable4/adapter", "results/deliverable4/adapter_hf.json")
+        args += ["--limit", "16", "--epochs", "1", "--eval-every", "1"]
+    _run(*args)
+    return stamp, _collect(folder, stamp=stamp)
+
+
+@app.function(timeout=1800, cpu=2.0, memory=4096, scaledown_window=2, volumes={"/vol": results_volume},
+              secrets=[modal.Secret.from_name("huggingface")])
+def publish_remote(stamp):
+    """CPU only: uploads the adapter saved by train_remote to Hugging Face and returns adapter_hf.json."""
+
+    import json
+
+    from huggingface_hub import HfApi
+
+    folder = Path("/vol") / stamp / "results" / "deliverable4" / "adapter"
+    card = folder / "README.md"
+    card.write_text(card.read_text(encoding="utf-8").replace("<repo>", HF_REPO), encoding="utf-8")
+    log = json.loads((folder / "training_log.json").read_text(encoding="utf-8"))
+    api = HfApi()
+    api.create_repo(HF_REPO, exist_ok=True, private=False)
+    commit = api.upload_folder(repo_id=HF_REPO, folder_path=str(folder),
+                               commit_message=f"Planificador QLoRA adapter (repo commit {log['commit'][:7]})")
+    published = {"repo_id": HF_REPO, "url": f"https://huggingface.co/{HF_REPO}",
+                 "revision": getattr(commit, "oid", None) or str(commit)}
+    print("published:", published, flush=True)
+    return {"results/deliverable4/adapter_hf.json": json.dumps(published, indent=1).encode("utf-8"),
+            "results/deliverable4/adapter/README.md": card.read_bytes()}
+
+
+@app.function(timeout=300, cpu=1.0, memory=1024, scaledown_window=2, secrets=[modal.Secret.from_name("huggingface")])
+def check_hf_remote():
+    """CPU only, a few seconds: which Hugging Face account the token belongs to and whether it can write."""
+
+    from huggingface_hub import HfApi
+
+    info = HfApi().whoami()
+    auth = info.get("auth", {}).get("accessToken", {})
+    print("user:", info.get("name"), "| token:", auth.get("displayName"), "| role:", auth.get("role"),
+          "| fine-grained scopes:", auth.get("fineGrained", {}).get("scoped"), flush=True)
+    print("target repo:", HF_REPO, flush=True)
 
 
 @app.function(timeout=4 * 3600, **GPU_OPTIONS)
@@ -148,9 +193,24 @@ def _scratch(name):
 
 
 @app.local_entrypoint()
-def train(ref: str = DEFAULT_REF, smoke: bool = False):
-    files = train_remote.remote(ref, smoke)
+def train(ref: str = DEFAULT_REF, smoke: bool = False, publish: bool = True):
+    stamp, files = train_remote.remote(ref, smoke)
     _save(files, _scratch("smoke-train") if smoke else ROOT)
+    print(f"adapter kept in the Volume sql4business-d4-results:/{stamp}")
+    if publish and not smoke:
+        _save(publish_remote.remote(stamp), ROOT)
+
+
+@app.local_entrypoint()
+def publish(stamp: str):
+    """Publishes an adapter already trained (Volume folder <stamp>), e.g. after a Hugging Face error."""
+
+    _save(publish_remote.remote(stamp), ROOT)
+
+
+@app.local_entrypoint()
+def check_hf():
+    check_hf_remote.remote()
 
 
 @app.local_entrypoint()
