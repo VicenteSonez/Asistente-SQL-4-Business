@@ -104,8 +104,9 @@ parámetros de la tarea, se ejecuta con las herramientas del Analista y se compa
 referencia calculado en Python sobre las tablas (0 discrepancias; se descartan empates).
 883 ejemplos de \emph{plan} (51\,\% de los de crecimiento nombran primero el período posterior, como
 q12) y 399 de \emph{reparación}: plan equivocado (7 tipos: orden invertido, filtro omitido, etc.)
-+ la retroalimentación que produce la propia función del Verificador $\rightarrow$ plan correcto. \textit{Revisión}: ningún modelo genera
-datos, así que no hay salidas generadas que revisar a mano; los 1.282 pares se verifican por ejecución.
++ la retroalimentación que produce la propia función del Verificador $\rightarrow$ plan correcto. \textit{Revisión}: además de verificar por
+ejecución los 1.282 pares, se revisó a mano una muestra al azar de 60 (\texttt{revision\_manual.csv}):
+60/60 correctos; 6 leen ``ventas'' como conteo (ver el caso de falla).
 \textit{Separación}: de 4.737 tareas se eliminaron las 450 con la misma operación y resultado, un paso
 numérico igual o similitud de 5-gramas $\geq 0{,}5$ con una pregunta de evaluación (máxima restante:
 0,19). Train/dev (1.155/127) se separan por cálculo; un test lo comprueba.
