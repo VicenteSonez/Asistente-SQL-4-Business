@@ -193,8 +193,8 @@ Lectura:
 **Mismo patrón en q11 y q11-p ("semestre").** El Planificador ajustado ya pone el total primero y la
 parte después (la falla de q11-p en el D3). Sin embargo, traduce "el semestre" a julio–diciembre (q11)
 o a enero–junio (q11-p), en vez de usar todo el período con datos (marzo–agosto). En los 35 ejemplos de
-entrenamiento con "semestre", el plan correcto no filtra fechas, pero todos son de ingreso y dicen
-"todo el semestre", y la forma de estas preguntas no aparece. `revisar_periodos` no lo marca porque la
+entrenamiento con "semestre", el plan correcto no filtra fechas, pero los 35 dicen "todo el semestre";
+la forma "en el semestre" de estas preguntas no aparece. `revisar_periodos` no lo marca porque la
 lista de chequeo del Verificador no fija fechas para "semestre". Trazas: `trazas_agentes_ft/official_q11.json`
 y `trazas_agentes_ft/heldout_q11-p.json`.
 
