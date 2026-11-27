@@ -11,7 +11,7 @@ Generative Artificial Intelligence (580694), Universidad de Concepción.
 | Deliverable 1 | [`docs/deliverable1.pdf`](docs/deliverable1.pdf) | [`notebooks/baseline_eval.ipynb`](notebooks/baseline_eval.ipynb) |
 | Deliverable 2 | [`docs/deliverable2.pdf`](docs/deliverable2.pdf) · [video](https://drive.google.com/file/d/1ovemshyIkbVYasXr7zaFDXIrdrHN7OH5/view) | [`notebooks/deliverable2_demo.ipynb`](notebooks/deliverable2_demo.ipynb) |
 | Deliverable 3 | [`docs/deliverable3.pdf`](docs/deliverable3.pdf) · [video](https://drive.google.com/file/d/1I9KuGPZe99HninfvLdC2E1XQjTf00EQZ/view?usp=sharing) | [`notebooks/deliverable3_demo.ipynb`](notebooks/deliverable3_demo.ipynb) |
-| Deliverable 4 | [`docs/deliverable4.pdf`](docs/deliverable4.pdf) · video: **PENDIENTE** · adaptador: [`vicentesonez/sql4business-planificador-qlora`](https://huggingface.co/vicentesonez/sql4business-planificador-qlora) | [`scripts/modal_d4.py`](scripts/modal_d4.py) (Modal, corrida medida) · [`notebooks/deliverable4_finetune.ipynb`](notebooks/deliverable4_finetune.ipynb) (Colab) |
+| Deliverable 4 | [`docs/deliverable4.pdf`](docs/deliverable4.pdf) · [video](https://youtu.be/zXe4w0KGbcs) · adaptador: [`vicentesonez/sql4business-planificador-qlora`](https://huggingface.co/vicentesonez/sql4business-planificador-qlora) | [`scripts/modal_d4.py`](scripts/modal_d4.py) (Modal, corrida medida) · [`notebooks/deliverable4_finetune.ipynb`](notebooks/deliverable4_finetune.ipynb) (Colab) |
 
 ## Definición de la tarea
 
@@ -51,7 +51,9 @@ tres agentes siguen con el modelo base; el adaptador se carga una sola vez sobre
 
 - **Adaptador publicado:** [`vicentesonez/sql4business-planificador-qlora`](https://huggingface.co/vicentesonez/sql4business-planificador-qlora), revisión `0b5a6a6` (`results/deliverable4/adapter_hf.json` guarda el repo y la
   revisión exacta; la evaluación descarga esa revisión, así que los resultados son los de esos pesos).
-- **Video:** **PENDIENTE**.
+- **Video:** [youtu.be/zXe4w0KGbcs](https://youtu.be/zXe4w0KGbcs): q12 y q11-p con el Planificador base y
+  con el ajustado, sobre la misma entrada (`modal run scripts/modal_d4.py::demo --ids q12,q11-p`; trazas en
+  `results/deliverable4/demo/`).
 
 ### Por qué el Planificador (evidencia del D3)
 
