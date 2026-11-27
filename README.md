@@ -119,14 +119,88 @@ Las mismas 27 preguntas y criterios, los cinco en la misma sesión:
 | `agentes_ft` | (4) el mismo sistema con el Planificador ajustado |
 | `control_icl` | control: pesos base; el Planificador recibe en su prompt los 4 ejemplos de entrenamiento más parecidos ([`icl_control.py`](src/sql4business/icl_control.py)) |
 
-Además se cuenta cuántas veces el Planificador repite un plan devuelto. Resultados: **PENDIENTE**
-(`results/deliverable4/<config>.json`, trazas en `results/deliverable4/trazas_<config>/`, detalle por
-pregunta en `results/deliverable4/por_pregunta.md`, tabla del PDF en `docs/deliverable4_results.tex`).
+Además se cuenta cuántas veces el Planificador repite un plan devuelto. Archivos:
+`results/deliverable4/<config>.json`, una traza por pregunta en `results/deliverable4/trazas_<config>/`,
+detalle por pregunta en `results/deliverable4/por_pregunta.md` y tabla del PDF en
+`docs/deliverable4_results.tex`.
+
+#### Corrida medida (26-11-2026, Modal H100, commit `ca38c00`, adaptador en la revisión `0b5a6a6`)
+
+| Sistema | Oficial sql | answer | e2e | Paráfrasis sql | answer | e2e | Combinadas e2e | Llamadas |
+|---|---|---|---|---|---|---|---|---|
+| (1) Prompt directo (D1) | 8/15 | 9/15 | — | 3/12 | 5/12 | — | — | 1,0 |
+| (2) Pipeline (D2) | 11/15 | 12/15 | 11/15 | 8/12 | 10/12 | 10/12 | 7/12 | 2,1 |
+| (3) Agentes, modelo base (D3) | 11/15 | 12/15 | 12/15 | 8/12 | 11/12 | 11/12 | 9/12 | 3,5 |
+| **(4) Agentes + Planificador ajustado (D4)** | **14/15** | **14/15** | **14/15** | 10/12 | 10/12 | 10/12 | 9/12 | 3,2 |
+| Control: base + mismos datos en el prompt | 14/15 | 14/15 | 14/15 | 7/12 | 8/12 | 8/12 | 9/12 | 3,3 |
+
+| Devoluciones al Planificador | Recibidas | Repitió el mismo plan |
+|---|---|---|
+| (3) base | 9 | 4 (q04, q10, q12, q11-p) |
+| (4) ajustado | 1 | 1 (q10, que igual termina bien) |
+| Control | 4 | 0 |
+
+Detalle por pregunta (`e2e`; solo las que difieren entre configuraciones):
+
+| Pregunta | Tipo | D2 | (3) base | (4) ajustado | Control |
+|---|---|---|---|---|---|
+| q04 | puntual | ✓ | ✗ | ✓ | ✓ |
+| q09 | combinada | ✗ | ✓ | ✓ | ✓ |
+| q10 | combinada | ✗ | ✗ | ✓ | ✗ |
+| q11 | combinada | ✗ | ✓ | ✗ | ✓ |
+| q12 | combinada | ✓ | ✗ | ✓ | ✓ |
+| q13 | puntual | ✗ | ✓ | ✓ | ✓ |
+| q09-p | combinada | ✗ | ✓ | ✗ | ✗ |
+| q10-p | combinada | ✓ | ✓ | ✓ | ✗ |
+| q11-p | combinada | ✓ | ✗ | ✗ | ✓ |
+| q14-p | combinada | ✗ | ✓ | ✓ | ✓ |
+| q07-p | puntual | ✓ | ✓ | ✓ | ✗ |
+| q08-p | puntual | ✓ | ✓ | ✓ | ✗ |
+
+Lectura:
+
+- **Continuidad:** (3) en el H100 reproduce el D3 v2 medido en el T4 (12/15 y 11/12, con las mismas
+  cuatro fallas: q04, q10, q12 y q11-p).
+- **Qué logran los pesos nuevos:**
+  - El Planificador ajustado resuelve q04, q10 y q12, justo los casos en que el base recibía la
+    retroalimentación correcta y repetía su plan.
+  - Casi siempre acierta al primer intento: 1 devolución contra 9.
+  - En total sube de 23/27 a 24/27 en `e2e` y usa menos llamadas.
+- **Lo que no mejora:** en paráfrasis baja de 11/12 a 10/12. Pierde q11 y q09-p (ver el caso de falla)
+  y q11-p sigue fallando, ahora por otra razón.
+- **Control:** los mismos datos dados como ejemplos en el prompt igualan al ajuste en el set oficial
+  (14/15, preguntas parecidas a las plantillas), pero caen a 8/12 en paráfrasis. En las preguntas
+  nuevas, los pesos generalizan mejor que el prompting con los mismos datos.
+- **Tamaño:** con 27 preguntas, 1 o 2 de diferencia es una tendencia, no una diferencia significativa.
 
 ### Caso de falla
 
-**PENDIENTE**: una entrada donde el sistema con el Planificador ajustado aún falla o empeora, por qué, y
-su traza en `results/deliverable4/trazas_agentes_ft/`.
+**q09-p** (paráfrasis externa; el sistema base la resolvía):
+
+> ¿Cuánto crecieron, en porcentaje, las ventas de junio a agosto respecto de marzo a mayo?
+
+- **Qué hace el sistema ajustado:** el Planificador pone bien el período anterior primero, que es lo
+  que se entrenó. Pero mide *el número de transacciones* (`COUNT(*)`, 220 → 329, +49,5 %) en vez del
+  *monto vendido* (48.748.530 → 78.058.920, +60,1 %).
+- **Por qué:** en los datos de entrenamiento, las 222 preguntas que dicen "ventas" se etiquetaron como
+  conteo de transacciones ("número de ventas", "producto con más ventas") y ninguna como monto. El
+  ajuste aprendió esa convención de las plantillas. El modelo base, sin ese sesgo, leía "ventas" como
+  monto en esta pregunta.
+- **Por qué no lo detecta el Verificador:** la forma del resultado (un cambio porcentual) y los
+  períodos calzan con la pregunta; ningún control revisa qué métrica se usó.
+- **Traza:** [`results/deliverable4/trazas_agentes_ft/heldout_q09-p.json`](results/deliverable4/trazas_agentes_ft/heldout_q09-p.json).
+
+**Mismo patrón en q11 y q11-p ("semestre").** El Planificador ajustado ya pone el total primero y la
+parte después (la falla de q11-p en el D3). Sin embargo, traduce "el semestre" a julio–diciembre (q11)
+o a enero–junio (q11-p), en vez de usar todo el período con datos (marzo–agosto). En los 35 ejemplos de
+entrenamiento con "semestre", el plan correcto no filtra fechas, pero todos son de ingreso y dicen
+"todo el semestre", y la forma de estas preguntas no aparece. `revisar_periodos` no lo marca porque la
+lista de chequeo del Verificador no fija fechas para "semestre". Trazas: `trazas_agentes_ft/official_q11.json`
+y `trazas_agentes_ft/heldout_q11-p.json`.
+
+Conclusión: el ajuste corrige el problema que se diagnosticó (repetir un plan devuelto, el orden de los
+períodos), pero también copia las convenciones de las plantillas. Un siguiente paso sería variar en los
+datos lo que significa "ventas" y los nombres de período.
 
 ### Cómo reproducir el Deliverable 4
 
